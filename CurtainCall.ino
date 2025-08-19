@@ -1,4 +1,4 @@
-#include <Stepper.h>
+#include <BTS7960.h>
 #include "ZigbeeCore.h"
 #include "ep/ZigbeeWindowCovering.h"
 
@@ -6,26 +6,35 @@
 #define ZIGBEE_COVERING_ENDPOINT 10
 #define MANUAL_BUTTON_PIN        9  // ESP32-C6/H2 Boot button
 
+// BTS7960 motor driver pins
+#define L_EN  0   // Left Enable
+#define R_EN  1   // Right Enable  
+#define L_PWM 2   // Left PWM (reverse)
+#define R_PWM 3   // Right PWM (forward)
+
 // Curtain position limits (in centimeters)
 #define MAX_LIFT_CM              200  // centimeters from open position (0-200)
 #define MIN_LIFT_CM              0
 
-// Stepper motor configuration
-const int STEPS_PER_REVOLUTION = 200;  // Adjust for your stepper motor
-const int TOTAL_STEPS_RANGE = 2000;    // Total steps for full curtain range
-const int MOTOR_SPEED_RPM = 60;        // Motor speed in RPM
+// DC motor configuration
+const int MOTOR_SPEED_PWM = 10;           // Motor speed (0-255)
+const unsigned long FULL_TRAVEL_TIME_MS = 30000;  // Time for full curtain travel (30 seconds)
+const int POSITION_UPDATE_INTERVAL_MS = 100;      // Position update frequency
 
 // Manual control settings
 const int BUTTON_DEBOUNCE_MS = 100;
 const int FACTORY_RESET_HOLD_MS = 3000;
 const int POSITION_INCREMENT_PERCENT = 20;
 
-// Stepper motor pins: IN1, IN2, IN3, IN4
-Stepper curtainStepper(STEPS_PER_REVOLUTION, 0, 6, 7, 5);
+// BTS7960 motor driver instance
+BTS7960 motor1(L_EN, R_EN, L_PWM, R_PWM);
 
 // Position tracking variables
-int currentStepPosition = TOTAL_STEPS_RANGE;  // Start fully open
 uint8_t currentLiftPercent = 100;             // Current position as percentage
+uint8_t targetLiftPercent = 100;              // Target position
+unsigned long moveStartTime = 0;              // When movement started
+bool isMoving = false;                        // Movement state
+int moveDirection = 0;                        // 1 = opening, -1 = closing, 0 = stopped
 
 // Zigbee window covering endpoint
 ZigbeeWindowCovering windowCoveringEndpoint = ZigbeeWindowCovering(ZIGBEE_COVERING_ENDPOINT);
@@ -35,10 +44,14 @@ void setup() {
   
   // Configure hardware
   pinMode(MANUAL_BUTTON_PIN, INPUT_PULLUP);
-  curtainStepper.setSpeed(MOTOR_SPEED_RPM);
+  
+  // Initialize BTS7960 motor driver using 1337encrypted library
+  motor1.begin();
+  motor1.enable();
+  motor1.stop();
 
   // Configure Zigbee window covering properties
-  windowCoveringEndpoint.setManufacturerAndModel("LC", "CurtainCall");
+  windowCoveringEndpoint.setManufacturerAndModel("LC", "CurtainCall2");
   windowCoveringEndpoint.setCoveringType(DRAPERY);
   windowCoveringEndpoint.setConfigStatus(true, true, false, true, true, true, true);
   windowCoveringEndpoint.setMode(false, true, false, false);
@@ -74,6 +87,9 @@ void setup() {
 }
 
 void loop() {
+  // Update motor position if moving
+  updateMotorPosition();
+  
   // Handle manual button press
   if (digitalRead(MANUAL_BUTTON_PIN) == LOW) {
     delay(BUTTON_DEBOUNCE_MS);
@@ -91,28 +107,83 @@ void loop() {
     }
     cycleThroughPositions();
   }
-  delay(500);
+  delay(50);  // Reduced delay for more responsive position updates
 }
 
-// Convert percentage (0-100) to stepper motor steps
-int convertPercentageToSteps(uint8_t percentage) {
-  return (percentage * TOTAL_STEPS_RANGE) / 100;
+// Update motor position during movement
+void updateMotorPosition() {
+  if (!isMoving) return;
+  
+  unsigned long elapsedTime = millis() - moveStartTime;
+  unsigned long targetTime = abs(targetLiftPercent - currentLiftPercent) * FULL_TRAVEL_TIME_MS / 100;
+  
+  if (elapsedTime >= targetTime) {
+    // Movement complete
+    stopMotor();
+    currentLiftPercent = targetLiftPercent;
+    windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
+    Serial.printf("Movement complete. Position: %d%%\n", currentLiftPercent);
+  } else {
+    // Update current position based on elapsed time
+    uint8_t startPercent = (moveDirection > 0) ? targetLiftPercent - abs(targetLiftPercent - currentLiftPercent) : targetLiftPercent + abs(targetLiftPercent - currentLiftPercent);
+    uint8_t newPercent = startPercent + (moveDirection * (elapsedTime * 100 / FULL_TRAVEL_TIME_MS));
+    
+    // Clamp to valid range
+    newPercent = constrain(newPercent, 0, 100);
+    
+    // Update position periodically
+    static unsigned long lastUpdate = 0;
+    if (millis() - lastUpdate >= POSITION_UPDATE_INTERVAL_MS) {
+      currentLiftPercent = newPercent;
+      windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
+      lastUpdate = millis();
+    }
+  }
+}
+
+// Start motor movement in specified direction using 1337encrypted library
+void startMotor(int direction) {
+  motor1.pwm = MOTOR_SPEED_PWM;  // Set speed first
+  
+  if (direction > 0) {
+    // Open curtain (forward)
+    motor1.front();
+    Serial.println("Motor: Opening curtain");
+  } else if (direction < 0) {
+    // Close curtain (reverse)
+    motor1.back();
+    Serial.println("Motor: Closing curtain");
+  }
+  isMoving = true;
+  moveDirection = direction;
+  moveStartTime = millis();
+}
+
+// Stop motor movement
+void stopMotor() {
+  motor1.stop();
+  isMoving = false;
+  moveDirection = 0;
+  Serial.println("Motor: Stopped");
 }
 
 // Move curtain to specified percentage position
 void moveCurtainToPosition(uint8_t targetPercent) {
-  int targetSteps = convertPercentageToSteps(targetPercent);
-  int stepsToMove = targetSteps - currentStepPosition;
+  // Stop any current movement
+  stopMotor();
   
-  if (stepsToMove != 0) {
-    Serial.printf("Moving curtain from %d%% to %d%% (%d steps)\n", 
-                  currentLiftPercent, targetPercent, stepsToMove);
-    curtainStepper.step(stepsToMove);
-    currentStepPosition = targetSteps;
+  targetLiftPercent = constrain(targetPercent, 0, 100);
+  
+  if (targetLiftPercent == currentLiftPercent) {
+    Serial.printf("Already at target position: %d%%\n", currentLiftPercent);
+    return;
   }
   
-  currentLiftPercent = targetPercent;
-  windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
+  Serial.printf("Moving curtain from %d%% to %d%%\n", currentLiftPercent, targetLiftPercent);
+  
+  // Determine direction: opening (increasing %) = positive, closing (decreasing %) = negative
+  int direction = (targetLiftPercent > currentLiftPercent) ? 1 : -1;
+  startMotor(direction);
 }
 
 // Zigbee callback: Open curtain fully
@@ -135,9 +206,8 @@ void moveToLiftPosition(uint8_t liftPercentage) {
 
 // Zigbee callback: Stop motor movement
 void stopCurtainMotor() {
-  // Note: Stepper.h library doesn't support stopping mid-move
-  // Consider using a non-blocking stepper library for true stop functionality
-  Serial.println("Stop motor requested (not implemented with Stepper.h)");
+  Serial.println("Stop motor requested");
+  stopMotor();
   windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
 }
 
