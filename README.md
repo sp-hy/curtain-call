@@ -1,105 +1,164 @@
-# CurtainCall - Zigbee Smart Curtain Controller
+# CurtainCall - Smart Curtain Controller with AS5600 Rotation Sensor
 
-A Zigbee-enabled smart curtain controller built for ESP32-C6/H2 that allows remote and manual control of motorized curtains through home automation systems.
+A smart curtain controller that uses the AS5600 magnetic rotation sensor for precise position tracking instead of time-based movement.
 
 ## Features
 
-- **Zigbee Integration**: Compatible with Zigbee home automation hubs
-- **Remote Control**: Open, close, and position curtains via Zigbee commands
-- **Manual Control**: Physical button for local operation
-- **Position Tracking**: Precise percentage-based positioning (0-100%)
-- **Factory Reset**: Long-press button to reset Zigbee settings
+- **Precise Position Tracking**: Uses AS5600 magnetic rotation sensor for accurate curtain position measurement
+- **Zigbee Integration**: Compatible with Zigbee home automation systems
+- **Motor Control**: BTS7960 motor driver for smooth curtain operation
+- **Real-time Feedback**: Continuous position updates and status reporting
+- **Calibration Support**: Easy setup and calibration for different curtain systems
 
 ## Hardware Requirements
 
-- **Microcontroller**: ESP32-C6 or ESP32-H2 with Zigbee support
-- **Stepper Motor**: 200 steps/revolution stepper motor
-- **Motor Driver**: Compatible stepper motor driver (ULN2003 or similar)
-- **Manual Button**: Connected to pin 9 (uses built-in boot button)
+### Components
+- ESP32 development board
+- AS5600 magnetic rotation sensor
+- BTS7960 motor driver module
+- DC motor for curtain operation
+- Magnet for AS5600 sensor
+- Power supply (12V recommended for motor)
 
-## Pin Connections
+### Wiring Diagram
 
-| Component | Pin | Description |
-|-----------|-----|-------------|
-| Stepper IN1 | 0 | Motor control pin 1 |
-| Stepper IN2 | 6 | Motor control pin 2 |
-| Stepper IN3 | 7 | Motor control pin 3 |
-| Stepper IN4 | 5 | Motor control pin 4 |
-| Manual Button | 9 | Boot button (INPUT_PULLUP) |
+```
+ESP32 Pin Connections:
+- GPIO 21 (SDA) → AS5600 SDA
+- GPIO 22 (SCL) → AS5600 SCL
+- GPIO 0  → BTS7960 L_EN
+- GPIO 7  → BTS7960 R_EN  
+- GPIO 6  → BTS7960 L_PWM
+- GPIO 5  → BTS7960 R_PWM
+- 3.3V    → AS5600 VCC
+- GND     → AS5600 GND, BTS7960 GND
+- 12V     → BTS7960 VCC (motor power)
+```
 
-## Configuration
+## AS5600 Sensor Setup
 
-### Curtain Limits
-- **Range**: 0-200 cm (adjustable in code)
-- **Step Range**: 2000 total steps for full travel
-- **Motor Speed**: 60 RPM
+The AS5600 is a magnetic rotation sensor that provides precise angular position measurement:
 
-### Position Control
-- **Increment**: 20% per manual button press
-- **Precision**: 1% positioning via Zigbee
-- **Direction**: 0% = fully closed, 100% = fully open
+1. **Mount the sensor** on a fixed part of your curtain mechanism
+2. **Attach a magnet** to the rotating part (curtain rod or pulley)
+3. **Ensure proper alignment** - the magnet should be centered over the sensor
+4. **Check magnetic field strength** - the sensor requires a magnetic field of 30-100 mT
 
-## Setup Instructions
+### Sensor Configuration
+- **I2C Address**: Default 0x36 (configurable)
+- **Resolution**: 12-bit (0.0879° per LSB)
+- **Range**: 0-360 degrees
+- **Update Rate**: Up to 1kHz
 
-1. **Hardware Setup**:
-   - Connect stepper motor to pins 0, 6, 7, 5
-   - Ensure manual button is connected to pin 9
-   - Power the stepper motor appropriately
+## Installation
 
-2. **Software Setup**:
-   - Install required libraries: `Stepper.h`, `ZigbeeCore.h`, `ZigbeeWindowCovering.h`
-   - Upload the code to your ESP32-C6/H2
-   - Monitor serial output for connection status
+1. **Install Required Libraries**:
+   - [AS5600 Library](https://github.com/RobTillaart/AS5600) by Rob Tillaart
+   - BTS7960 motor driver library
+   - Your Zigbee library
 
-3. **Zigbee Pairing**:
-   - Power on the device
-   - The device will automatically attempt to join a Zigbee network
-   - Use your Zigbee hub to discover and pair the device
-   - Device appears as "LC CurtainCall" window covering
+2. **Upload the Code**:
+   ```bash
+   # Upload CurtainCall.ino to your ESP32
+   ```
+
+3. **Calibrate the System**:
+   - Open Serial Monitor at 115200 baud
+   - Follow the calibration prompts to set open/closed positions
 
 ## Usage
 
-### Manual Control
-- **Short Press**: Cycle through positions in 20% increments (0% → 20% → 40% → ... → 100% → 0%)
-- **Long Press (3+ seconds)**: Factory reset - clears Zigbee settings and reboots
+### Basic Operation
+The system automatically tracks curtain position based on rotation angle:
 
-### Zigbee Control
-- **Open**: Move curtain to 100% open position
-- **Close**: Move curtain to 0% closed position
-- **Position**: Set specific percentage (0-100%)
-- **Stop**: Halt movement (limited support with current stepper library)
+- **0%**: Fully closed position
+- **100%**: Fully open position
+- **Real-time updates**: Position is continuously monitored and reported
 
-## Zigbee Device Information
+### Zigbee Commands
+- `openCurtain()`: Move to 100% open
+- `closeCurtain()`: Move to 0% closed  
+- `moveToPosition(percentage)`: Move to specific position
+- `stopCurtain()`: Stop current movement
 
-- **Manufacturer**: LC
-- **Model**: CurtainCall
-- **Device Type**: Window Covering (Drapery)
-- **Endpoint**: 10
-- **Supported Features**: Lift control (up/down movement)
+### Calibration
+Run the calibration function to set your curtain's rotation range:
 
-## Serial Monitor Output
+```cpp
+calibrateRotation();
+```
 
-The device provides detailed status information via serial output:
-- Zigbee connection status
-- Position changes and movements
-- Button press detection
-- Error messages and diagnostics
+This will prompt you to:
+1. Move curtain to fully closed position
+2. Move curtain to fully open position
+3. Automatically calculate the rotation range
+
+## Configuration
+
+### Pin Definitions
+```cpp
+#define AS5600_SDA 21  // I2C SDA pin
+#define AS5600_SCL 22  // I2C SCL pin
+#define MOTOR_L_EN 0   // Motor enable left
+#define MOTOR_R_EN 7   // Motor enable right
+#define MOTOR_L_PWM 6  // Motor PWM left
+#define MOTOR_R_PWM 5  // Motor PWM right
+```
+
+### Motor Settings
+```cpp
+const int MOTOR_SPEED = 200;        // PWM value (0-255)
+const int UPDATE_INTERVAL_MS = 100; // Position update frequency
+```
 
 ## Troubleshooting
 
-- **Zigbee Connection Issues**: Check if your hub supports the device type and ensure pairing mode is active
-- **Motor Not Moving**: Verify stepper motor connections and power supply
-- **Inaccurate Positioning**: Calibrate the `TOTAL_STEPS_RANGE` value for your specific setup
-- **Factory Reset**: Hold the manual button for 3+ seconds to reset Zigbee settings
+### AS5600 Issues
+- **"AS5600 not found"**: Check I2C wiring and connections
+- **Inconsistent readings**: Verify magnet alignment and strength
+- **Wrong direction**: Use `as5600.setDirection()` to correct
 
-## Customization
+### Motor Issues
+- **Motor not moving**: Check power supply and enable pins
+- **Wrong direction**: Swap motor wires or adjust direction logic
+- **Jittery movement**: Reduce motor speed or add smoothing
 
-Key parameters that can be adjusted in the code:
-- `MAX_LIFT_CM`: Maximum curtain travel distance
-- `TOTAL_STEPS_RANGE`: Total steps for full curtain range
-- `MOTOR_SPEED_RPM`: Stepper motor speed
-- `POSITION_INCREMENT_PERCENT`: Manual button step size
+### Position Tracking Issues
+- **Incorrect position**: Recalibrate the rotation range
+- **Drift over time**: Check for mechanical backlash or sensor mounting
+- **Sudden jumps**: Verify magnet is securely attached
+
+## Advanced Features
+
+### Custom Rotation Range
+Modify the rotation range for different curtain mechanisms:
+
+```cpp
+curtain.totalRotation = 180.0; // For 180-degree rotation
+```
+
+### Direction Configuration
+Change sensor direction if needed:
+
+```cpp
+as5600.setDirection(AS5600_COUNTERCLOCK_WISE);
+```
+
+### Error Handling
+The system includes error checking for:
+- Sensor communication failures
+- Invalid position values
+- Motor control issues
 
 ## License
 
-This project is open source. Feel free to modify and distribute according to your needs. 
+This project is open source. Please refer to the individual library licenses for the AS5600 and other dependencies.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit pull requests or open issues for bugs and feature requests.
+
+## Acknowledgments
+
+- [Rob Tillaart](https://github.com/RobTillaart) for the excellent AS5600 library
+- The open source community for Zigbee and motor control libraries 
