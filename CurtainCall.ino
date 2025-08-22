@@ -20,9 +20,11 @@ const int UPDATE_INTERVAL_MS = 100;
 bool MOTOR_DIRECTION_INVERTED = true;  // Set to true if motor directions are backwards
 
 // AS5600 settings
-const unsigned long AS5600_READ_INTERVAL = 50;  // Read every 50ms for responsive control
-const float DEGREES_PER_PERCENT = 18.0;  // 5 rotations (1800°) for 0-100%
-const int ANGLE_FILTER_SIZE = 3;  // Moving average filter size
+const unsigned long AS5600_READ_INTERVAL = 20;  // 20ms between reads for maximum I2C stability
+const float TOTAL_ROTATIONS_0_TO_100 = 5.0;  // Total rotations from 0% to 100%
+const float DEGREES_PER_PERCENT = TOTAL_ROTATIONS_0_TO_100 * 360.0 / 100.0;  // Calculated: 18° per percent
+const float MAX_ANGLE_CHANGE_PER_MS = 15.0;  // Maximum degrees change per millisecond (spike threshold)
+// At 40 RPM max speed = 0.24°/ms, but allowing for 10ms intervals and fast movements
 
 // Motor driver
 BTS7960 motor(MOTOR_L_EN, MOTOR_R_EN, MOTOR_L_PWM, MOTOR_R_PWM);
@@ -45,12 +47,11 @@ struct {
 struct {
   float lastAngle = 0.0;
   float currentAngle = 0.0;
-  float filteredAngle = 0.0;
-  float angleHistory[ANGLE_FILTER_SIZE] = {0};
-  int historyIndex = 0;
+  float validAngle = 0.0;  // Last known good angle
   int rotationCount = 0;
   bool initialized = false;
   unsigned long lastReadTime = 0;
+  unsigned long spikeCount = 0;  // Track rejected spikes for debugging
 } encoder;
 
 // Zigbee endpoint
@@ -64,15 +65,40 @@ void setup() {
   motor.enable();
   motor.stop();
 
-  // Initialize AS5600
+  // Initialize AS5600 with conservative I2C settings
   Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(100000);  // Set I2C clock to 100kHz (Standard Mode for stability)
+  Wire.setTimeout(1000);  // Set 1 second timeout
   as5600.begin();
   
   Serial.println("AS5600 Magnetic Encoder initialized");
-  if (as5600.isConnected()) {
+  
+  // Diagnostic: Test I2C bus
+  Serial.println("=== I2C Diagnostic ===");
+  Serial.printf("SDA Pin: %d, SCL Pin: %d\n", SDA_PIN, SCL_PIN);
+  Serial.printf("I2C Clock: 100kHz\n");
+  
+  // Test AS5600 connection multiple times
+  int connectionAttempts = 5;
+  int successCount = 0;
+  for (int i = 0; i < connectionAttempts; i++) {
+    if (as5600.isConnected()) {
+      successCount++;
+    }
+    delay(100);
+  }
+  
+  Serial.printf("AS5600 connection test: %d/%d successful\n", successCount, connectionAttempts);
+  
+  if (successCount >= 3) {
     Serial.println("AS5600 connected successfully");
   } else {
-    Serial.println("AS5600 connection failed!");
+    Serial.println("AS5600 connection UNSTABLE - CHECK WIRING!");
+    Serial.println("Common issues:");
+    Serial.println("1. Missing 4.7k pull-up resistors on SDA/SCL");
+    Serial.println("2. Loose connections");
+    Serial.println("3. Wrong pin assignments");
+    Serial.println("4. Power supply issues");
   }
 
   // Configure Zigbee
@@ -91,15 +117,15 @@ void setup() {
 }
 
 void loop() {
-  // Read encoder frequently for position feedback
+  // Read encoder as fast as possible for maximum responsiveness
   if (millis() - encoder.lastReadTime >= AS5600_READ_INTERVAL) {
     updateEncoder();
-    encoder.lastReadTime = millis();
+    // lastReadTime is set inside updateEncoder() for more accurate timing
   }
   
   updatePosition();
   
-  delay(10);  // Shorter delay for more responsive control
+  // No artificial delay - run at maximum speed
 }
 
 void setupZigbee() {
@@ -271,12 +297,7 @@ void initializeEncoder() {
   uint16_t rawAngle = as5600.readAngle();
   encoder.currentAngle = rawAngle * AS5600_RAW_TO_DEGREES;
   encoder.lastAngle = encoder.currentAngle;
-  encoder.filteredAngle = encoder.currentAngle;
-  
-  // Initialize filter history
-  for (int i = 0; i < ANGLE_FILTER_SIZE; i++) {
-    encoder.angleHistory[i] = encoder.currentAngle;
-  }
+  encoder.validAngle = encoder.currentAngle;
   
   encoder.rotationCount = 0;
   encoder.initialized = true;
@@ -287,7 +308,7 @@ void initializeEncoder() {
   
   // Find the closest rotation count that puts us near the target
   encoder.rotationCount = round((targetAbsoluteAngle - encoder.currentAngle) / 360.0);
-  curtain.absoluteAngle = encoder.rotationCount * 360.0 + encoder.currentAngle;
+  curtain.absoluteAngle = encoder.rotationCount * 360.0 + encoder.validAngle;
   curtain.calibrated = true;
   
   Serial.printf("Encoder auto-calibrated: Raw=%.1f°, Rotations=%d, Absolute=%.1f°, Position=%d%%\n", 
@@ -299,51 +320,155 @@ void updateEncoder() {
     return;
   }
   
-  // Read current angle
-  uint16_t rawAngle = as5600.readAngle();
+  // Performance monitoring
+  static unsigned long maxReadTime = 0;
+  static unsigned long errorCount = 0;
+  unsigned long startTime = micros();
+  
+  // Read current angle with multiple retry attempts
+  uint16_t rawAngle = 0;
+  bool readSuccess = false;
+  
+  for (int attempt = 0; attempt < 3 && !readSuccess; attempt++) {
+    if (attempt > 0) {
+      delay(5);  // Brief delay between retries
+    }
+    
+    unsigned long attemptStart = micros();
+    
+    // Try to read the angle
+    if (as5600.isConnected()) {
+      rawAngle = as5600.readAngle();
+      unsigned long attemptTime = micros() - attemptStart;
+      
+      // Consider read successful if it completes reasonably quickly
+      if (attemptTime < 20000) {  // Less than 20ms
+        readSuccess = true;
+        if (attemptTime > maxReadTime) {
+          maxReadTime = attemptTime;
+        }
+      }
+    }
+  }
+  
+  // If all attempts failed, handle gracefully
+  if (!readSuccess) {
+    errorCount++;
+    
+    // Attempt I2C bus recovery every 5 consecutive failures
+    static unsigned long consecutiveErrors = 0;
+    consecutiveErrors++;
+    
+    if (consecutiveErrors >= 5) {
+      Serial.printf("I2C recovery: %lu consecutive failures\n", consecutiveErrors);
+      // Re-initialize I2C bus
+      Wire.end();
+      delay(50);  // Longer delay for recovery
+      Wire.begin(SDA_PIN, SCL_PIN);
+      Wire.setClock(100000);
+      Wire.setTimeout(1000);
+      delay(50);
+      consecutiveErrors = 0;  // Reset counter after recovery attempt
+    }
+    
+    // Use last known good angle to continue operation
+    encoder.currentAngle = encoder.validAngle;
+    encoder.lastReadTime = millis();
+    return;  // Skip this reading
+  } else {
+    // Reset consecutive error counter on successful read
+    static unsigned long consecutiveErrors = 0;
+    consecutiveErrors = 0;
+  }
+  
   encoder.currentAngle = rawAngle * AS5600_RAW_TO_DEGREES;
   
-  // Detect rotation rollover (360° -> 0° or 0° -> 360°)
+  // Calculate time since last reading for spike detection
+  unsigned long currentTime = millis();
+  unsigned long deltaTime = currentTime - encoder.lastReadTime;
+  if (deltaTime == 0) deltaTime = 1;  // Prevent division by zero
+  
+  // Spike detection - check if angle change is reasonable
   float angleDifference = encoder.currentAngle - encoder.lastAngle;
   
+  // Handle rollover for spike detection (360° -> 0° or 0° -> 360°)
   if (angleDifference > 180.0) {
+    angleDifference -= 360.0;
+  } else if (angleDifference < -180.0) {
+    angleDifference += 360.0;
+  }
+  
+  // Calculate maximum allowed change based on time elapsed
+  float maxAllowedChange = MAX_ANGLE_CHANGE_PER_MS * deltaTime;
+  
+  // Check for spike - but only reject if it's truly unreasonable
+  bool isSpike = false;
+  
+  if (encoder.lastReadTime > 0) {
+    // More lenient spike detection when motor is moving
+    float adjustedThreshold = maxAllowedChange;
+    if (curtain.isMoving) {
+      adjustedThreshold *= 2.0;  // Double threshold when motor is active
+    }
+    
+    // Only reject if change is extreme AND not a simple rollover
+    if (abs(angleDifference) > adjustedThreshold && abs(angleDifference) < 300.0) {
+      isSpike = true;
+    }
+  }
+  
+  if (isSpike) {
+    // Spike detected - reject this reading
+    encoder.spikeCount++;
+    encoder.currentAngle = encoder.validAngle;  // Use last valid angle
+    
+    // Debug spike detection (less frequent)
+    static unsigned long lastSpikeReport = 0;
+    if (currentTime - lastSpikeReport >= 2000) {  // Report every 2 seconds
+      Serial.printf("Spike rejected: %.1f° change in %lums (max: %.1f°)\n", 
+        abs(angleDifference), deltaTime, maxAllowedChange);
+      lastSpikeReport = currentTime;
+    }
+  } else {
+    // Valid reading - update valid angle
+    encoder.validAngle = encoder.currentAngle;
+  }
+  
+  // Detect rotation rollover using valid angle
+  float validAngleDifference = encoder.validAngle - encoder.lastAngle;
+  
+  if (validAngleDifference > 180.0) {
     // Crossed from 360° to 0° (counter-clockwise)
     encoder.rotationCount--;
-  } else if (angleDifference < -180.0) {
+  } else if (validAngleDifference < -180.0) {
     // Crossed from 0° to 360° (clockwise)
     encoder.rotationCount++;
   }
   
-  // Apply moving average filter
-  encoder.angleHistory[encoder.historyIndex] = encoder.currentAngle;
-  encoder.historyIndex = (encoder.historyIndex + 1) % ANGLE_FILTER_SIZE;
+  // Calculate absolute angle using valid angle
+  float rawAbsoluteAngle = encoder.rotationCount * 360.0 + encoder.validAngle;
   
-  float sum = 0.0;
-  for (int i = 0; i < ANGLE_FILTER_SIZE; i++) {
-    sum += encoder.angleHistory[i];
-  }
-  encoder.filteredAngle = sum / ANGLE_FILTER_SIZE;
+  // Apply bounds enforcement for display/position calculation only
+  // Keep the raw calculation for internal tracking
+  curtain.absoluteAngle = constrain(rawAbsoluteAngle, 0.0, 1800.0);
   
-  // Calculate absolute angle (accounting for multiple rotations)
-  float rawAbsoluteAngle = encoder.rotationCount * 360.0 + encoder.filteredAngle;
+  encoder.lastAngle = encoder.validAngle;
+  encoder.lastReadTime = currentTime;
   
-  // Calculate absolute angle but don't auto-stop here to avoid conflicts
-  curtain.absoluteAngle = rawAbsoluteAngle;
-  
-  // Simple bounds enforcement - constrain but don't change motor state here
-  if (curtain.absoluteAngle > 1800.0) {
-    curtain.absoluteAngle = 1800.0;
-  } else if (curtain.absoluteAngle < 0.0) {
-    curtain.absoluteAngle = 0.0;
-  }
-  
-  encoder.lastAngle = encoder.currentAngle;
-  
-  // Debug output every 2 seconds
+  // Debug output every 2 seconds with polling rate info
   static unsigned long lastDebugPrint = 0;
+  static unsigned long readCount = 0;
+  readCount++;
+  
   if (millis() - lastDebugPrint >= 2000) {
-    Serial.printf("Encoder: %.1f° (Raw: %.1f°, Rotations: %d)\n", 
-      curtain.absoluteAngle, encoder.filteredAngle, encoder.rotationCount);
+    float actualHz = readCount / 2.0;  // Reads per second
+    float rawAbsoluteAngle = encoder.rotationCount * 360.0 + encoder.validAngle;
+    Serial.printf("Encoder: %.1f° (Raw: %.1f°, Valid: %.1f°, Rotations: %d) Polling: %.1fHz, Max read: %luμs, Spikes: %lu, I2C errors: %lu\n", 
+      curtain.absoluteAngle, rawAbsoluteAngle, encoder.validAngle, encoder.rotationCount, actualHz, maxReadTime, encoder.spikeCount, errorCount);
+    maxReadTime = 0;  // Reset for next measurement period
+    encoder.spikeCount = 0;  // Reset spike count
+    errorCount = 0;  // Reset error count
+    readCount = 0;  // Reset read count
     lastDebugPrint = millis();
   }
 }
@@ -359,7 +484,7 @@ void calibratePosition(uint8_t knownPosition) {
   
   // Reset encoder tracking
   encoder.rotationCount = 0;
-  curtain.absoluteAngle = encoder.filteredAngle;
+  curtain.absoluteAngle = encoder.validAngle;
   
   // Set known position
   curtain.current = constrain(knownPosition, 0, 100);
@@ -367,7 +492,7 @@ void calibratePosition(uint8_t knownPosition) {
   curtain.calibrated = true;
   
   Serial.printf("Position calibrated: %d%% = %.1f° (Raw encoder: %.1f°)\n", 
-    curtain.current, curtain.absoluteAngle, encoder.filteredAngle);
+    curtain.current, curtain.absoluteAngle, encoder.validAngle);
 }
 
 void calibratePosition() {
