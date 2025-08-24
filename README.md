@@ -1,97 +1,206 @@
-# CurtainCall - Smart Curtain Controller with AS5600 Rotation Sensor
+# CurtainCall - Smart Curtain Controller v2.0
 
-A smart curtain controller that uses the AS5600 magnetic rotation sensor for precise position tracking instead of time-based movement.
+A precision smart curtain controller featuring Zigbee connectivity and magnetic position sensing for accurate, reliable curtain automation.
 
 ## Features
 
-- **Precise Position Tracking**: Uses AS5600 magnetic rotation sensor for accurate curtain position measurement
-- **Zigbee Integration**: Compatible with Zigbee home automation systems
-- **Motor Control**: BTS7960 motor driver for smooth curtain operation
-- **Real-time Feedback**: Continuous position updates and status reporting
-- **Calibration Support**: Easy setup and calibration for different curtain systems
+- **Precision Position Tracking**: AS5600 magnetic rotation sensor with 0.0879° resolution
+- **Zigbee 3.0 Integration**: Full home automation compatibility with window covering cluster
+- **Robust Motor Control**: BTS7960 high-current motor driver for smooth, powerful operation
+- **Real-time Position Feedback**: Continuous monitoring with 20ms update intervals
+- **Advanced Error Handling**: I2C recovery, spike detection, and safety limits
+- **Multi-rotation Support**: Handles up to 5 full rotations (1800°) for long curtain runs
+- **Auto-calibration**: Intelligent position recovery on power-up
 
-## Hardware Requirements
+## Bill of Materials (BOM)
 
-### Components
-- ESP32 development board
-- AS5600 magnetic rotation sensor
-- BTS7960 motor driver module
-- DC motor for curtain operation
-- Magnet for AS5600 sensor
-- Power supply (12V recommended for motor)
+### Core Components
+| Component | Quantity | Description | Estimated Cost |
+|-----------|----------|-------------|----------------|
+| ESP32 DevKit | 1 | Main microcontroller with Zigbee 3.0 support | $8-12 |
+| AS5600 Magnetic Encoder | 1 | 12-bit contactless position sensor | $3-5 |
+| BTS7960 Motor Driver | 1 | 43A high-power motor controller | $8-12 |
+| 12V DC Geared Motor | 1 | High-torque motor for curtain operation | $15-25 |
+| Diametric Magnet | 1 | 6mm diameter for AS5600 sensor | $2-3 |
 
-### Wiring Diagram
+### Power & Protection
+| Component | Quantity | Description | Estimated Cost |
+|-----------|----------|-------------|----------------|
+| 12V 3A Power Supply | 1 | Wall adapter or switching supply | $10-15 |
+| LM2596 Buck Converter | 1 | 12V to 5V step-down (optional) | $3-5 |
+| Fuse Holder & 5A Fuse | 1 | Motor circuit protection | $2-3 |
+| TVS Diode (15V) | 2 | Motor voltage spike protection | $1-2 |
+
+### Mechanical Hardware
+| Component | Quantity | Description | Estimated Cost |
+|-----------|----------|-------------|----------------|
+| Motor Mounting Bracket | 1 | Custom or universal motor mount | $5-10 |
+| Drive Pulley/Gear | 1 | Connects motor to curtain mechanism | $3-8 |
+| Timing Belt/Chain | 1 | Power transmission (if required) | $5-10 |
+| Shaft Coupling | 1 | Flexible coupling for sensor mounting | $3-5 |
+
+### Electronics & Wiring
+| Component | Quantity | Description | Estimated Cost |
+|-----------|----------|-------------|----------------|
+| Dupont Jumper Wires | 20 | Male-female and male-male connectors | $3-5 |
+| Breadboard/PCB | 1 | Prototyping or permanent mounting | $2-8 |
+| Terminal Blocks | 4 | Power and motor connections | $2-4 |
+| Heat Shrink Tubing | 1 set | Wire protection and insulation | $3-5 |
+
+**Total Estimated Cost: $75-140** (depending on motor choice and sourcing)
+
+## Wiring Diagrams
+
+### Circuit Schematic
 
 ```
-ESP32 Pin Connections:
-- GPIO 21 (SDA) → AS5600 SDA
-- GPIO 22 (SCL) → AS5600 SCL
-- GPIO 0  → BTS7960 L_EN
-- GPIO 7  → BTS7960 R_EN  
-- GPIO 6  → BTS7960 L_PWM
-- GPIO 5  → BTS7960 R_PWM
-- 3.3V    → AS5600 VCC
-- GND     → AS5600 GND, BTS7960 GND
-- 12V     → BTS7960 VCC (motor power)
+                     CurtainCall v2.0 Circuit Diagram
+    
+    12V PSU ───[FUSE]───┬─── BTS7960 VCC ───┬─── M+ ───┐
+        │               │                   │          │
+        └─── Buck Conv ─┘                   │          │    ┌─── DC MOTOR ───┐
+                 │                          │          │    │               │
+                5V                          │        [TVS]  │               │
+                                            │          │    │               │
+    ┌─────────────── ESP32 DevKit ──────────┼──────────┼────┼───────────────┼───┐
+    │                                       │          │    │               │   │
+    │  GPIO 21 (SDA) ─────────────────────┐ │          │    │               │   │
+    │  GPIO 22 (SCL) ─────────────────────┼─┼──────────┼────┼───────────────┼───┼─ GND
+    │  GPIO  0 ───── BTS7960 L_EN         │ │          │    │               │   │
+    │  GPIO  7 ───── BTS7960 R_EN         │ │          └──M-┘               │   │
+    │  GPIO  6 ───── BTS7960 L_PWM        │ │                               │   │
+    │  GPIO  5 ───── BTS7960 R_PWM        │ │                               │   │
+    │                                     │ │         ┌─── AS5600 ──────────┐   │
+    │  3.3V ──────────────────────────────┼─┼─────────┼─ VCC               │   │
+    │  GND ───────────────────────────────┼─┼─────────┼─ GND               │   │
+    └─────────────────────────────────────┼─┼─────────┼─────────────────────┼───┘
+                                          │ │         │                     │
+                                          │ └─────────┼─ SDA               │
+                                          └───────────┼─ SCL               │
+                                                      │                     │
+                                              ┌───────┼─ MAGNET ────────────┘
+                                              │       └─────────────────────┐
+                                              │                             │
+                                        Rotating Shaft/Pulley              │
+                                              │                             │
+                                              └─────── Curtain Rod ─────────┘
+
+    Components:
+    - ESP32: Main controller with Zigbee
+    - AS5600: Magnetic rotation encoder  
+    - BTS7960: High-current motor driver
+    - TVS: Transient voltage suppressor
+    - Buck Conv: 12V to 5V converter (optional)
 ```
 
-## AS5600 Sensor Setup
+### Power Distribution
 
-The AS5600 is a magnetic rotation sensor that provides precise angular position measurement:
+```
+12V Power Supply (3A)
+│
+├── 5A Fuse ──► BTS7960 Motor Driver (12V)
+│                    │
+│                    └── DC Motor (12V)
+│
+└── LM2596 Buck Converter (Optional)
+         │
+         └── 5V for BTS7960 logic (if needed)
 
-1. **Mount the sensor** on a fixed part of your curtain mechanism
-2. **Attach a magnet** to the rotating part (curtain rod or pulley)
-3. **Ensure proper alignment** - the magnet should be centered over the sensor
-4. **Check magnetic field strength** - the sensor requires a magnetic field of 30-100 mT
+ESP32 provides 3.3V for AS5600 sensor
+```
 
-### Sensor Configuration
-- **I2C Address**: Default 0x36 (configurable)
-- **Resolution**: 12-bit (0.0879° per LSB)
-- **Range**: 0-360 degrees
-- **Update Rate**: Up to 1kHz
+### Pin Assignment Table
 
-## Installation
+| ESP32 Pin | Function | Connected To | Signal Type |
+|-----------|----------|--------------|-------------|
+| GPIO 21 | I2C SDA | AS5600 SDA | Digital I2C |
+| GPIO 22 | I2C SCL | AS5600 SCL | Digital I2C |
+| GPIO 0 | Motor Control | BTS7960 L_EN | Digital Output |
+| GPIO 7 | Motor Control | BTS7960 R_EN | Digital Output |
+| GPIO 6 | Motor PWM | BTS7960 L_PWM | PWM Output |
+| GPIO 5 | Motor PWM | BTS7960 R_PWM | PWM Output |
+| 3.3V | Power | AS5600 VCC | Power Supply |
+| GND | Ground | All GND pins | Common Ground |
 
-1. **Install Required Libraries**:
+## AS5600 Magnetic Encoder Setup
+
+The AS5600 provides precise angular position measurement with contactless operation:
+
+### Physical Installation
+1. **Mount the sensor** securely to a stationary part of the curtain mechanism
+2. **Attach the magnet** to the rotating element (motor shaft, pulley, or gear)
+3. **Maintain 1-3mm air gap** between magnet and sensor for optimal performance
+4. **Center alignment** is critical - magnet must be concentric with sensor
+5. **Use diametric magnetization** for best linearity and accuracy
+
+### Technical Specifications
+- **I2C Address**: 0x36 (factory default, programmable)
+- **Resolution**: 12-bit (4096 steps = 0.0879° per step)
+- **Angular Range**: Full 360° rotation
+- **Magnetic Field**: 30-100 mT optimal range
+- **Update Rate**: 20ms intervals (50Hz) for I2C stability
+- **Supply Voltage**: 3.3V from ESP32
+- **Current Consumption**: 6.5mA typical
+
+## Software Installation
+
+### Required Libraries
+1. **AS5600 Library**: `#include <AS5600.h>`
    - [AS5600 Library](https://github.com/RobTillaart/AS5600) by Rob Tillaart
-   - BTS7960 motor driver library
-   - Your Zigbee library
+2. **BTS7960 Motor Driver**: `#include <BTS7960.h>`
+   - Available through Arduino Library Manager
+3. **Zigbee Core**: Built into ESP32 Arduino Core v3.0+
+   - `#include "ZigbeeCore.h"`
+   - `#include "ep/ZigbeeWindowCovering.h"`
 
-2. **Upload the Code**:
-   ```bash
-   # Upload CurtainCall.ino to your ESP32
-   ```
+### Installation Steps
+1. **Install ESP32 Arduino Core** (v3.0 or later for Zigbee support)
+2. **Install required libraries** through Arduino IDE Library Manager
+3. **Upload CurtainCall.ino** to your ESP32
+4. **Configure your home automation** to recognize the new Zigbee device
 
-3. **Calibrate the System**:
-   - Open Serial Monitor at 115200 baud
-   - Follow the calibration prompts to set open/closed positions
+### Configuration Parameters
+```cpp
+// Hardware configuration (CurtainCall.ino lines 24-38)
+const int MOTOR_SPEED = 200;                    // PWM value (0-255)
+const float TOTAL_ROTATIONS_0_TO_100 = 5.0;    // Total rotations for full travel
+const float MAX_ANGLE_CHANGE_PER_MS = 15.0;    // Spike detection threshold
+const unsigned long AS5600_READ_INTERVAL = 20;  // Sensor read interval (ms)
+```
 
 ## Usage
 
 ### Basic Operation
-The system automatically tracks curtain position based on rotation angle:
+The system tracks curtain position through absolute angle measurement:
 
-- **0%**: Fully closed position
-- **100%**: Fully open position
-- **Real-time updates**: Position is continuously monitored and reported
+- **0%**: Fully closed (0° absolute angle)
+- **100%**: Fully open (1800° absolute angle = 5 full rotations)
+- **Real-time tracking**: 20ms update intervals with spike detection
+- **Multi-rotation support**: Handles up to 5 complete rotations
+- **Auto-calibration**: Intelligent position recovery on startup
 
-### Zigbee Commands
-- `openCurtain()`: Move to 100% open
-- `closeCurtain()`: Move to 0% closed  
-- `moveToPosition(percentage)`: Move to specific position
-- `stopCurtain()`: Stop current movement
+### Zigbee Integration
+The device appears as a **Window Covering** in your Zigbee network with these commands:
 
-### Calibration
-Run the calibration function to set your curtain's rotation range:
+| Zigbee Command | Function | Description |
+|----------------|----------|-------------|
+| `Open` | `openCurtain()` | Move to 100% open position |
+| `Close` | `closeCurtain()` | Move to 0% closed position |
+| `GoToLiftPercentage` | `moveToPosition(uint8_t)` | Move to specific percentage |
+| `Stop` | `stopCurtain()` | Immediately stop movement |
 
-```cpp
-calibrateRotation();
-```
+### System Features
+- **Precise Position Control**: 0.0879° resolution with AS5600 encoder
+- **Safety Limits**: Automatic stop at 0% and 100% positions  
+- **Error Recovery**: I2C communication recovery and spike filtering
+- **Smooth Movement**: BTS7960 provides smooth acceleration/deceleration
+- **Status Reporting**: Real-time position updates to Zigbee coordinator
 
-This will prompt you to:
-1. Move curtain to fully closed position
-2. Move curtain to fully open position
-3. Automatically calculate the rotation range
+### Initial Setup
+1. **Power on** the device - it will join your Zigbee network automatically
+2. **Manual positioning** - move curtain to known position (e.g., 50% open)
+3. **Auto-calibration** - system calculates absolute position based on stored state
+4. **Test operation** - use home automation to verify full range movement
 
 ## Configuration
 
@@ -113,20 +222,33 @@ const int UPDATE_INTERVAL_MS = 100; // Position update frequency
 
 ## Troubleshooting
 
-### AS5600 Issues
-- **"AS5600 not found"**: Check I2C wiring and connections
-- **Inconsistent readings**: Verify magnet alignment and strength
-- **Wrong direction**: Use `as5600.setDirection()` to correct
+### Power Issues
+- **Device not starting**: Check 12V power supply capacity (minimum 2A)
+- **Random resets**: Verify all ground connections are secure
+- **Motor stops unexpectedly**: Check fuse, may need higher current rating
 
-### Motor Issues
-- **Motor not moving**: Check power supply and enable pins
-- **Wrong direction**: Swap motor wires or adjust direction logic
-- **Jittery movement**: Reduce motor speed or add smoothing
+### AS5600 Sensor Issues
+- **Position not updating**: Check I2C wiring (SDA/SCL crossed or loose)
+- **Erratic readings**: Verify magnet alignment (must be centered over sensor)
+- **Sensor timeouts**: System includes automatic I2C recovery after 5 failures
+- **Wrong direction**: Adjust `MOTOR_DIRECTION_INVERTED` in code
 
-### Position Tracking Issues
-- **Incorrect position**: Recalibrate the rotation range
-- **Drift over time**: Check for mechanical backlash or sensor mounting
-- **Sudden jumps**: Verify magnet is securely attached
+### Motor Control Issues  
+- **Motor not responding**: Verify BTS7960 enable pins and PWM connections
+- **Wrong rotation direction**: Check motor wires or toggle direction setting
+- **Jerky movement**: Reduce `MOTOR_SPEED` value or check mechanical binding
+- **Overshooting target**: Adjust `DEGREES_PER_PERCENT` for your curtain travel
+
+### Zigbee Connectivity
+- **Device not joining network**: Ensure ESP32 Arduino Core v3.0+ is installed
+- **Commands not working**: Check if device appears as "Window Covering" type
+- **Position not updating**: Verify Zigbee coordinator supports position feedback
+
+### Position Tracking
+- **Incorrect position after power-up**: System auto-calibrates based on last known position
+- **Drift over time**: Check for mechanical backlash in drive system
+- **Sudden position jumps**: Spike detection active - check magnet mounting
+- **Limited range**: Adjust `TOTAL_ROTATIONS_0_TO_100` for your curtain system
 
 ## Advanced Features
 
