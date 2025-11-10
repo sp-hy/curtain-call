@@ -1,5 +1,6 @@
 #include "ZigbeeCore.h"
 #include "ep/ZigbeeWindowCovering.h"
+#include <Preferences.h>
 
 // Hardware Configuration - ESP32-C6 XIAO Pin Mapping
 #define ZIGBEE_COVERING_ENDPOINT 10
@@ -10,14 +11,11 @@
 #define RF_SWITCH_POWER_PIN      3   // GPIO3 - RF switch power control
 #define ANTENNA_SELECT_PIN       14  // GPIO14 - External antenna select
 
-// Position Limits
-#define MAX_LIFT_CM              200
-#define MIN_LIFT_CM              0
+// Position Limits - Using step-based positioning only
 
 // Motor Configuration
-const int STEPS_PER_REVOLUTION = 200;
 const int MICROSTEPS = 2;
-const int STEPS_FOR_FULL_TRAVEL = 800;
+const int STEPS_FOR_FULL_TRAVEL = 2000;
 
 // Timing Settings - Reliable stepping
 const int STEP_DELAY_US = 1000;       // 1ms between steps for reliable operation
@@ -40,14 +38,69 @@ unsigned long lastStepTime = 0;
 
 ZigbeeWindowCovering windowCoveringEndpoint = ZigbeeWindowCovering(ZIGBEE_COVERING_ENDPOINT);
 
+// Persistent storage for position state
+Preferences prefs;
+
+// Save current position to NVS
+void savePosition() {
+  prefs.putUChar("liftPercent", currentLiftPercent);
+  prefs.putLong("stepPosition", currentStepPosition);
+  Serial.print("Position saved: ");
+  Serial.print(currentLiftPercent);
+  Serial.println("%");
+}
+
+// Load saved position from NVS
+void loadPosition() {
+  currentLiftPercent = prefs.getUChar("liftPercent", 100);  // Default to 100% (open)
+  currentStepPosition = prefs.getLong("stepPosition", STEPS_FOR_FULL_TRAVEL);
+  targetLiftPercent = currentLiftPercent;
+  targetStepPosition = currentStepPosition;
+  Serial.print("Position loaded: ");
+  Serial.print(currentLiftPercent);
+  Serial.println("%");
+}
+
+// Force position report to Zigbee network (for Home Assistant)
+void reportPositionToZigbee() {
+  if (Zigbee.connected()) {
+    // Try both percentage and position reporting for better compatibility
+    windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
+    
+    // Also try position-based reporting (0-100 range)
+    uint16_t liftPosition = map(currentLiftPercent, 0, 100, 0, 100);
+    windowCoveringEndpoint.setLiftPosition(liftPosition);
+    
+    Serial.print("Position reported to Zigbee: ");
+    Serial.print(currentLiftPercent);
+    Serial.print("% (position: ");
+    Serial.print(liftPosition);
+    Serial.println(")");
+  } else {
+    Serial.println("Zigbee not connected - skipping position report");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
+  
+  // Initialize persistent storage and load saved position
+  prefs.begin("curtain", false);  // false = read/write mode
+  loadPosition();
   
   initializeHardware();
   configureZigbee();
   connectToZigbee();
   
-  windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
+  // Wait a bit for Zigbee network to be fully ready
+  delay(2000);
+  
+  // Force initial position reporting multiple times to ensure HA gets it
+  for (int i = 0; i < 3; i++) {
+    reportPositionToZigbee();
+    delay(1000);
+  }
+  
   Serial.println("CurtainCall initialized");
 }
 
@@ -71,10 +124,18 @@ void initializeHardware() {
 
 void configureZigbee() {
   windowCoveringEndpoint.setManufacturerAndModel("LC", "CurtainCall2");
+  
+  // Use DRAPERY type for curtain control
   windowCoveringEndpoint.setCoveringType(DRAPERY);
-  windowCoveringEndpoint.setConfigStatus(true, true, false, true, true, true, true);
+  
+  // Set configuration: operational, online, not commands_reversed, lift closed_loop, lift encoder_controlled, no tilt
+  windowCoveringEndpoint.setConfigStatus(true, true, false, true, true, false, false);
+  
+  // Set mode: not motor_reversed, calibration_mode enabled, not maintenance_mode, not leds_on
   windowCoveringEndpoint.setMode(false, true, false, false);
-  windowCoveringEndpoint.setLimits(MIN_LIFT_CM, MAX_LIFT_CM, 0, 0);
+  
+  // Set limits for lift only (0-100 range)
+  windowCoveringEndpoint.setLimits(0, 100, 0, 0);
 
   windowCoveringEndpoint.onOpen(openCurtainFully);
   windowCoveringEndpoint.onClose(closeCurtainFully);
@@ -100,6 +161,14 @@ void connectToZigbee() {
 void loop() {
   updateMotorPosition();
   handleButtonPress();
+  
+  // Periodic position reporting to ensure Home Assistant stays updated
+  static unsigned long lastReport = 0;
+  if (millis() - lastReport >= 30000) {  // Report every 30 seconds
+    reportPositionToZigbee();
+    lastReport = millis();
+  }
+  
   delay(5);
 }
 
@@ -127,6 +196,11 @@ void updateMotorPosition() {
     stopMotor();
     currentLiftPercent = targetLiftPercent;
     windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
+    windowCoveringEndpoint.setLiftPosition(currentLiftPercent);  // Also set position
+    savePosition();  // Save position when movement completes
+    Serial.print("Movement complete - Position: ");
+    Serial.print(currentLiftPercent);
+    Serial.println("%");
     return;
   }
   
