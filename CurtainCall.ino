@@ -1,12 +1,14 @@
 #include "ZigbeeCore.h"
 #include "ep/ZigbeeWindowCovering.h"
 
-// Hardware Configuration
+// Hardware Configuration - ESP32-C6 XIAO Pin Mapping
 #define ZIGBEE_COVERING_ENDPOINT 10
-#define MANUAL_BUTTON_PIN        9
-#define STEP_PIN                 2
-#define DIR_PIN                  3
-#define ENABLE_PIN               4
+#define MANUAL_BUTTON_PIN        9   // Boot button (built-in, safe to use)
+#define STEP_PIN                 0   // GPIO0 - Stepper step/PUL+ signal
+#define DIR_PIN                  1   // GPIO1 - Stepper direction/DIR+ signal  
+#define ENABLE_PIN               2   // GPIO2 - Stepper enable/ENA+ signal
+#define RF_SWITCH_POWER_PIN      3   // GPIO3 - RF switch power control
+#define ANTENNA_SELECT_PIN       14  // GPIO14 - External antenna select
 
 // Position Limits
 #define MAX_LIFT_CM              200
@@ -17,9 +19,9 @@ const int STEPS_PER_REVOLUTION = 200;
 const int MICROSTEPS = 2;
 const int STEPS_FOR_FULL_TRAVEL = 800;
 
-// Timing Settings
-const int STEP_DELAY_US = 10;
-const int MIN_PULSE_WIDTH_US = 25;
+// Timing Settings - Reliable stepping
+const int STEP_DELAY_US = 1000;       // 1ms between steps for reliable operation
+const int MIN_PULSE_WIDTH_US = 10;    // 10us pulse width for reliable step detection
 const int POSITION_UPDATE_INTERVAL_MS = 100;
 
 // Control Settings
@@ -54,6 +56,13 @@ void initializeHardware() {
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIR_PIN, OUTPUT);
   pinMode(ENABLE_PIN, OUTPUT);
+  
+  // External antenna configuration
+  pinMode(RF_SWITCH_POWER_PIN, OUTPUT);    // RF switch power on
+  digitalWrite(RF_SWITCH_POWER_PIN, LOW);
+  
+  pinMode(ANTENNA_SELECT_PIN, OUTPUT);     // select external antenna
+  digitalWrite(ANTENNA_SELECT_PIN, HIGH);
   
   digitalWrite(STEP_PIN, LOW);
   digitalWrite(DIR_PIN, LOW);
@@ -91,7 +100,7 @@ void connectToZigbee() {
 void loop() {
   updateMotorPosition();
   handleButtonPress();
-  delay(10);
+  delay(5);
 }
 
 void handleButtonPress() {
@@ -191,4 +200,20 @@ void cycleThroughPositions() {
   uint8_t newPosition = currentLiftPercent + POSITION_INCREMENT_PERCENT;
   if (newPosition > 100) newPosition = 0;
   moveCurtainToPosition(newPosition);
+}
+
+// Calibration function - call this to reset position to known state
+void calibratePosition() {
+  Serial.println("Calibrating position...");
+  // Move to fully closed position (0%)
+  moveCurtainToPosition(0);
+  while (isMoving) {
+    updateMotorPosition();
+    delay(10);
+  }
+  // Reset step counter to ensure accuracy
+  currentStepPosition = 0;
+  currentLiftPercent = 0;
+  windowCoveringEndpoint.setLiftPercentage(0);
+  Serial.println("Calibration complete - position reset to 0%");
 }
