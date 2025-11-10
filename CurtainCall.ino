@@ -95,7 +95,7 @@ void initializeHardware() {
 }
 
 void configureZigbee() {
-  windowCoveringEndpoint.setManufacturerAndModel("LC", "CurtainCall2");
+  windowCoveringEndpoint.setManufacturerAndModel("LC", "CurtainCall");
   windowCoveringEndpoint.setCoveringType(DRAPERY);
   windowCoveringEndpoint.setConfigStatus(true, true, false, true, true, true, true);
   windowCoveringEndpoint.setMode(false, true, false, false);
