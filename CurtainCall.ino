@@ -25,7 +25,6 @@ const int POSITION_UPDATE_INTERVAL_MS = 100;
 // Control Settings
 const int BUTTON_DEBOUNCE_MS = 100;
 const int FACTORY_RESET_HOLD_MS = 3000;
-const int POSITION_INCREMENT_PERCENT = 20;
 
 // State Variables
 uint8_t currentLiftPercent = 100;
@@ -141,7 +140,6 @@ void handleButtonPress() {
         delay(30000);
       }
     }
-    cycleThroughPositions();
   }
 }
 
@@ -225,11 +223,6 @@ void stopCurtainMotor() {
   windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
 }
 
-void cycleThroughPositions() {
-  uint8_t newPosition = currentLiftPercent + POSITION_INCREMENT_PERCENT;
-  if (newPosition > 100) newPosition = 0;
-  moveCurtainToPosition(newPosition);
-}
 
 // Calibration function - call this to reset position to known state
 void calibratePosition() {
