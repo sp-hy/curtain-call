@@ -50,7 +50,7 @@ Adjust these values based on your specific curtain setup and motor characteristi
 Device automatically saves position and restores on restart.
 
 ## 3D Parts
-Parts for the motor housing and shaft are included as a FreeCAD project
+Parts for the motor housing and shaft are included as a FreeCAD project. Supports should be enabled.
 
 <img width="1672" height="1240" alt="{85E4A3B8-E166-47C7-9F0F-4D093E4323D5}" src="https://github.com/user-attachments/assets/eda60e0a-6398-4d39-a2c0-4207fc55d064" />
 

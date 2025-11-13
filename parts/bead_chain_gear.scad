@@ -6,9 +6,8 @@ echo(h);
 n_teeth=21;
 link_radius=.5;
 cover_height=2;
-shaft_radius = 12/2 + 0.25; // 12mm diameter D-shaft
-d_shaft_flat_depth = 0.5; // Adjust this value to match your motor shaft's flat depth
-
+shaft_radius = 8.5/2; // 8.5mm diameter D-shaft (8mm + 0.5mm clearance)
+d_shaft_flat_depth = 1; // Flat cuts 1mm deep from edge
 module make_sphere_ring(ring_radius, sphere_radius, num_spheres) {
   union(){
     for (i = [0:num_spheres]){
@@ -22,7 +21,6 @@ module make_sphere_ring(ring_radius, sphere_radius, num_spheres) {
     }
   }
 }
-
 module make_torus(ring_radius, inner_radius) {
   // openscad apparently can't handle rotate_extrude in a difference, so this isn't a real cylinder
   /*rotate_extrude(convexity=10)translate([ring_radius, 0, 0])circle(inner_radius);*/
@@ -37,22 +35,24 @@ module make_torus(ring_radius, inner_radius) {
         center = true);
   }
 }
-
 module bead_ring() {
   union() {
     make_sphere_ring(r, ball_radius, n_teeth);
     make_torus(r, link_radius);
   }
 }
-
 module d_shaft_hole(shaft_r, flat_depth, shaft_height) {
+  // Flat cuts in flat_depth from the edge
+  // Position the cutting plane at radius - flat_depth from center
+  cut_position = shaft_r - flat_depth;
+  
   difference() {
     cylinder(r=shaft_r, h=shaft_height, center=true);
-    translate([shaft_r - flat_depth, 0, 0])
+    // Position cube so its cutting face is at cut_position from center
+    translate([cut_position + shaft_r/2, 0, 0])
       cube([shaft_r, shaft_r * 2, shaft_height + 1], center=true);
   }
 }
-
 module make_gear() {
   difference() {
     union() {
@@ -67,7 +67,6 @@ module make_gear() {
     # bead_ring();
   }
 }
-
 make_gear();
 /*bead_ring() ;*/
 /*make_torus(r, link_radius);*/
