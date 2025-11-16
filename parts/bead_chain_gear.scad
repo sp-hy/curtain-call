@@ -7,7 +7,8 @@ n_teeth=21;
 link_radius=.5;
 cover_height=2;
 shaft_radius = 8.5/2; // 8.5mm diameter D-shaft (8mm + 0.5mm clearance)
-d_shaft_flat_depth = 1; // Flat cuts 1mm deep from edge
+shaft_flat_radius = 8/2; // Flat based on 8mm diameter
+d_shaft_flat_depth = 1; // Flat cuts 1mm deep from the 8mm edge
 module make_sphere_ring(ring_radius, sphere_radius, num_spheres) {
   union(){
     for (i = [0:num_spheres]){
@@ -41,10 +42,10 @@ module bead_ring() {
     make_torus(r, link_radius);
   }
 }
-module d_shaft_hole(shaft_r, flat_depth, shaft_height) {
-  // Flat cuts in flat_depth from the edge
-  // Position the cutting plane at radius - flat_depth from center
-  cut_position = shaft_r - flat_depth;
+module d_shaft_hole(shaft_r, flat_r, flat_depth, shaft_height) {
+  // Flat cuts in flat_depth from the edge of flat_r
+  // Position the cutting plane at flat_r - flat_depth from center
+  cut_position = flat_r - flat_depth;
   
   difference() {
     cylinder(r=shaft_r, h=shaft_height, center=true);
@@ -63,7 +64,7 @@ module make_gear() {
         cylinder(h=cover_height, r=r+ball_radius, center=true);
     }
     /*cylinder(h=h, r=r, center=true);*/
-    # d_shaft_hole(shaft_radius, d_shaft_flat_depth, h + 4 * cover_height);
+    # d_shaft_hole(shaft_radius, shaft_flat_radius, d_shaft_flat_depth, h + 4 * cover_height);
     # bead_ring();
   }
 }
