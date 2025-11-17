@@ -40,8 +40,8 @@ const int MIN_STEPS_CONFIG = 100;     // Minimum steps (safety limit)
 const int MAX_STEPS_CONFIG = 10000;   // Maximum steps (safety limit)
 
 // Motor timing and acceleration
-float currentDelayUs = 2000.0f;            // Start speed (microseconds between steps)
-const float targetDelayUs = 800.0f;        // Target running speed (microseconds)
+float currentDelayUs = 4000.0f;            // Start speed (microseconds between steps)
+const float targetDelayUs = 1600.0f;       // Target running speed (microseconds)
 const float accelStepUs = 5.0f;            // Acceleration rate (smaller = slower ramp)
 
 // Motor idle timeout
@@ -215,7 +215,7 @@ void startMotor(int direction) {
   moveDirection = direction;
   lastStepTime = micros();
   lastMotionTime = millis();
-  currentDelayUs = 2000.0f; // Reset acceleration ramp
+  currentDelayUs = 4000.0f; // Reset acceleration ramp
 }
 
 void stopMotor() {
@@ -230,6 +230,8 @@ void stopMotor() {
 // Motion Update Loop
 // ============================================================================
 void updateMotorPosition() {
+  static unsigned long lastUpdate = 0;
+  
   if (!isMoving) return;
 
   unsigned long now = micros();
@@ -242,21 +244,23 @@ void updateMotorPosition() {
   if (currentDelayUs > targetDelayUs)
     currentDelayUs -= accelStepUs;
 
-  // Update Zigbee position every 100ms
-  static unsigned long lastUpdate = 0;
+  // Stop when target position is reached
+  if (currentStepPosition == targetStepPosition) {
+    // Update to exact target percentage before stopping
+    currentLiftPercent = targetLiftPercent;
+    windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
+    stopMotor();
+    lastUpdate = millis();  // Reset timer to prevent stale update after stop
+    return;
+  }
+
+  // Update Zigbee position every 100ms (only during motion)
   if (millis() - lastUpdate >= POSITION_UPDATE_INTERVAL_MS) {
     uint8_t progressPercent = (uint8_t)((float)currentStepPosition / STEPS_FOR_FULL_TRAVEL * 100.0f);
     progressPercent = constrain(progressPercent, 0, 100);
     windowCoveringEndpoint.setLiftPercentage(progressPercent);
     currentLiftPercent = progressPercent;
     lastUpdate = millis();
-  }
-
-  // Stop when target position is reached
-  if (currentStepPosition == targetStepPosition) {
-    stopMotor();
-    currentLiftPercent = targetLiftPercent;
-    windowCoveringEndpoint.setLiftPercentage(currentLiftPercent);
   }
 }
 
