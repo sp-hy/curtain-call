@@ -53,6 +53,13 @@ Device automatically saves position and restores on restart.
 Parts for the motor housing and cover are included as a FreeCAD project. Supports should be enabled.  I'd use something like ABS if it's going to be in the sun.
 
 <img width="1672" height="1240" alt="{85E4A3B8-E166-47C7-9F0F-4D093E4323D5}" src="https://github.com/user-attachments/assets/eda60e0a-6398-4d39-a2c0-4207fc55d064" />
+---
+
+Once the motor is mounted there should be room for your ESP32 & Buck etc:
+<img width="2405" height="1008" alt="image" src="https://github.com/user-attachments/assets/64227833-fa4b-4720-a6cf-f05637817bf2" />
+
+
+
 
 
 ## Factory Reset
