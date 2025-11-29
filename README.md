@@ -32,12 +32,27 @@ A Zigbee-enabled smart curtain device based on ESP32 microcontrollers. Features 
 
 ## Configuration
 
+### Dynamic Configuration (via Home Assistant)
+
+The device uses the **Tilt** control for runtime configuration:
+
+- **Tilt Position (0-100%)** maps to **STEPS_FOR_FULL_TRAVEL**
+- Tilt 0% = 100 steps (minimum)
+- Tilt 100% = 10,000 steps (maximum)
+- Example: Set tilt to 20% for 2000 steps, 50% for 5000 steps
+- Configuration is saved to flash and persists across reboots
+
+### Code Configuration
+
 Key variables in the code that control curtain behavior:
 
-- **STEPS_FOR_FULL_TRAVEL**: Total steps for complete curtain range (default: 2000)
-- **STEP_DELAY_US**: Delay between motor steps in microseconds (default: 1000)
+- **STEPS_FOR_FULL_TRAVEL**: Total steps for complete curtain range (default: 2000, configurable via Tilt)
+- **currentDelayUs**: Starting motor speed in microseconds (default: 4000)
+- **targetDelayUs**: Target running speed after acceleration (default: 1600)
+- **accelStepUs**: Acceleration rate - smaller = slower ramp (default: 5.0)
+- **MOTOR_IDLE_TIMEOUT_MS**: Time before disabling motor driver when idle (default: 5000ms)
 
-Adjust these values based on your specific curtain setup and motor characteristics.
+The motor uses acceleration ramping for smooth starts and stops. Adjust these values based on your specific curtain setup and motor characteristics.
 
 
 ## Setup
@@ -45,9 +60,10 @@ Adjust these values based on your specific curtain setup and motor characteristi
 1. Connect stepper driver to pins 0, 1, 2 and common GND
 2. Upload code to ESP32. If not using the recommended Xiao Variant, remove the code related to external antenna.
 3. Pair with Zigbee hub (appears as "LC CurtainCall")
-4. Control via home automation (Zigbee commands)
+4. Configure max travel using the Tilt control (see Configuration section)
+5. Control via home automation (Zigbee commands)
 
-Device automatically saves position and restores on restart.
+Device automatically saves both position and configuration, restoring on restart.
 
 ## 3D Parts
 Parts for the motor housing and cover are included as a FreeCAD project. Supports should be enabled.  I'd use something like ABS if it's going to be in the sun.
